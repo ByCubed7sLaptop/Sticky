@@ -228,10 +228,17 @@ public:
         const auto match = frontMatter.match(data);
 
         if (!match.hasMatch()) {
-            if (data.startsWith(title->text())) {
-                data.remove(0, data.indexOf('\n') + 1);
+            QString content = data;
+
+            if (content.startsWith(title->text())) {
+                const qsizetype newline = content.indexOf('\n');
+                if (newline >= 0)
+                    content.remove(0, newline + 1);
+                else
+                    content.clear();
             }
-            editor->setPlainText(data);
+
+            editor->setPlainText(content);
             return;
         }
 
