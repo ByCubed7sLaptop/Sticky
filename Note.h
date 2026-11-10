@@ -58,9 +58,7 @@ public:
         resize(geometry.size());
         move(geometry.topLeft());
 
-        // --------------------------------------------------
         // Styling
-        // --------------------------------------------------
 
         setStyleSheet(
             "QWidget { background: #fff29b; }"
@@ -91,18 +89,14 @@ public:
             "}"
         );
 
-        // --------------------------------------------------
         // Main layout
-        // --------------------------------------------------
 
         auto *layout = new QVBoxLayout(this);
 
         layout->setContentsMargins(5, 5, 5, 5);
         layout->setSpacing(3);
 
-        // --------------------------------------------------
         // Title bar
-        // --------------------------------------------------
 
         auto *header = new QWidget(this);
 
@@ -137,9 +131,7 @@ public:
         headerLayout->addWidget(minimizeButton);
         headerLayout->addWidget(closeButton);
 
-        // --------------------------------------------------
         // Note editor
-        // --------------------------------------------------
 
         editor = new QPlainTextEdit(this);
 
@@ -148,9 +140,7 @@ public:
         layout->addWidget(header);
         layout->addWidget(editor);
 
-        // --------------------------------------------------
         // Connections
-        // --------------------------------------------------
 
         connect(title, &QLineEdit::textChanged,
                 this, [this](const QString &value) {
@@ -207,27 +197,26 @@ public:
     {
         const QString content = editor->toPlainText();
 
-        const QByteArray hash =
-            QCryptographicHash::hash(
-                content.toUtf8(),
-                QCryptographicHash::Sha256
-            ).toHex();
-
-        QString metadata;
-
-        metadata += "---\n";
-        metadata += "markleaf_id: " + metadataId + "\n";
-        metadata += "created_at: " + createdAt + "\n";
-        metadata += "updated_at: " + updatedAt + "\n";
-        metadata += "pinned: " +
-                    QString(pinned ? "true" : "false") + "\n";
-        metadata += "archived: " +
-                    QString(archived ? "true" : "false") + "\n";
-        metadata += "body_sha256: " +
-                    QString::fromLatin1(hash) + "\n";
-        metadata += "---\n";
-
-        return metadata + content;
+        // Markleafs Metadata can be disabled in the config
+//        const QByteArray hash =
+//            QCryptographicHash::hash(
+//                content.toUtf8(),
+//                QCryptographicHash::Sha256
+//            ).toHex();
+//        QString metadata;
+//        metadata += "---\n";
+//        metadata += "markleaf_id: " + metadataId + "\n";
+//        metadata += "created_at: " + createdAt + "\n";
+//        metadata += "updated_at: " + updatedAt + "\n";
+//        metadata += "pinned: " +
+//                    QString(pinned ? "true" : "false") + "\n";
+//        metadata += "archived: " +
+//                    QString(archived ? "true" : "false") + "\n";
+//        metadata += "body_sha256: " +
+//                    QString::fromLatin1(hash) + "\n";
+//        metadata += "---\n";
+//        return metadata + content;
+        return title->text() + "\n" + content;
     }
 
     void deserialize(const QString &data)
@@ -239,6 +228,9 @@ public:
         const auto match = frontMatter.match(data);
 
         if (!match.hasMatch()) {
+            if (data.startsWith(title->text())) {
+                data.remove(0, data.indexOf('\n') + 1);
+            }
             editor->setPlainText(data);
             return;
         }
