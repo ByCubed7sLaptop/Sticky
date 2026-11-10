@@ -22,6 +22,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++ zip
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ pkg-config qt6-base-dev
+
       - name: Run build script
         run: |
           chmod +x build.sh
