@@ -5,202 +5,145 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QJsonArray>
-#include <QJsonObject>
-#include <QJsonDocument>
-#include <QFile>
-#include <QDir>
-#include <QFileDialog>
-#include <QStandardPaths>
-#include <QSettings>
-#include <QTimer>
 #include <QLabel>
 #include <QVector>
-#include <QLineEdit>
-#include <QMouseEvent>
-#include <QEvent>
-#include <QPoint>
-#include <QTextStream>
+#include <QFileDialog>
 #include <QSettings>
-#include <QFileInfo>
-#include <QRegularExpression>
-#include <QUuid>
-#include <QCryptographicHash>
+#include <QTimer>
+#include <QDir>
+#include <QFile>
 #include <QDateTime>
 #include <QRegularExpression>
+#include <QRect>
 
 #include "Utils.h"
 #include "Note.h"
 
-static QString notesDirectory()
-{
-    QSettings settings("DesktopApps", "StickyNotes");
-
-    QString dir = settings.value("notesDirectory").toString();
-
-    if (dir.isEmpty()) {
-        dir = QStandardPaths::writableLocation(
-            QStandardPaths::AppDataLocation);
-    }
-
-    QDir().mkpath(dir);
-    return dir;
-}
-
-static QString noteFileName(const QString &title)
-{
-    QString name = title.trimmed();
-
-    // Replace characters that are invalid in filenames.
-    name.replace(QRegularExpression(R"([<>:"/\\|?*])"), "_");
-
-    // Remove trailing dots and spaces.
-    while (name.endsWith('.') || name.endsWith(' '))
-        name.chop(1);
-
-    if (name.isEmpty())
-        name = "Untitled";
-
-    return name + ".md";
-}
-
-
-
-
-
 class StickyApp : public QWidget
 {
+
+private:
     QVector<Note*> notes;
     int nextId = 0;
     bool loading = false;
 
 public:
-    StickyApp()
+    explicit StickyApp(QWidget *parent = nullptr)
+        : QWidget(parent)
     {
         setWindowTitle("Sticky Notes Manager");
         resize(330, 150);
 
         auto *layout = new QVBoxLayout(this);
 
-        auto *add = new QPushButton("+ New Sticky Note");
-        auto *choose = new QPushButton("Save Notes To Directory...");
+        auto *addButton = new QPushButton("+ New Sticky Note", this);
+        auto *directoryButton =
+            new QPushButton("Save Notes To Directory...", this);
 
-        auto *location = new QLabel;
-        location->setWordWrap(true);
+        auto *locationLabel = new QLabel(this);
+        locationLabel->setWordWrap(true);
 
-        layout->addWidget(add);
-        layout->addWidget(choose);
-        layout->addWidget(new QLabel("Current save location:"));
-        layout->addWidget(location);
+        layout->addWidget(addButton);
+        layout->addWidget(directoryButton);
+        layout->addWidget(new QLabel("Current save location:", this));
+        layout->addWidget(locationLabel);
 
-        connect(add, &QPushButton::clicked,
+        connect(addButton, &QPushButton::clicked,
                 this, [this]() {
             addNote();
         });
 
-        connect(choose, &QPushButton::clicked,
-                this, [this, location]() {
-
-            QString dir = QFileDialog::getExistingDirectory(
+        connect(directoryButton, &QPushButton::clicked,
+                this, [this, locationLabel]() {
+            const QString directory = QFileDialog::getExistingDirectory(
                 this,
                 "Choose Notes Directory",
                 Utils::notesDirectory()
             );
 
-            if (!dir.isEmpty() &&
-                Utils::setNotesDirectory(dir)) {
+            if (directory.isEmpty())
+                return;
 
-                location->setText(dir);
+            if (Utils::setNotesDirectory(directory)) {
+                locationLabel->setText(directory);
                 saveNotes();
             }
         });
 
-        location->setText(notesDirectory());
+        locationLabel->setText(Utils::notesDirectory());
 
         loadNotes();
 
-        //if (notes.isEmpty())
-        //    addNote();
+        auto *saveTimer = new QTimer(this);
 
-        auto *timer = new QTimer(this);
+        connect(saveTimer, &QTimer::timeout,
+                this, &StickyApp::saveNotes);
 
-        connect(timer, &QTimer::timeout,
-                this, [this]() {
-            saveNotes();
-        });
-
-        timer->start(30000);
+        saveTimer->start(30000);
     }
 
-
-    void addNote(QString text = "",
-                 QRect geometry = QRect(300, 200, 280, 240),
-                 QString noteTitle = "New Note",
-                 bool pinned = true)
+private:
+    void addNote(
+        const QString &text = QString(),
+        const QRect &geometry = QRect(300, 200, 280, 240),
+        const QString &title = "New Note",
+        bool pinned = true)
     {
-        Note *note = new Note(
-            nextId++, noteTitle, text, geometry, pinned);
+        auto *note = new Note(
+            nextId++,
+            title,
+            text,
+            geometry,
+            pinned
+        );
 
         notes.append(note);
 
-        //connect(note->editor, &QPlainTextEdit::textChanged, this, [this]() { saveNotes(); });
+        connect(note->editor, &QPlainTextEdit::textChanged,
+                this, &StickyApp::saveNotes);
 
-        //connect(note->title, &QLineEdit::textChanged, this, [this]() { saveNotes(); });
-
-        int id = note->id;
+        connect(note->title, &QLineEdit::editingFinished,
+                this, &StickyApp::saveNotes);
 
         connect(note, &QObject::destroyed,
-                this, [this, id]() {
-//            notes.removeIf(
-//                [id](Note *n) {
-//                    return !n || n->id == id;
-//                }
-//            );
-//
-//            if (!QApplication::closingDown()) {
-//                QString base = notesDirectory() + QString("/note_%1").arg(id);
-//                QFile::remove(base + ".md");
-//                QFile::remove(base + ".cfg");
-//            }
-
-            saveNotes();
-        });
+                this, &StickyApp::saveNotes);
 
         note->show();
+
         saveNotes();
     }
-
-
-
 
     void saveNotes()
     {
         if (loading)
             return;
 
-        for (Note *note : notes) {
+        const QString directory = Utils::notesDirectory();
 
+        for (Note *note : notes) {
             if (!note)
                 continue;
 
-            QString newFileName = Utils::noteFileName(note->title->text());
+            const QString newFileName =
+                Utils::noteFileName(note->title->text());
 
-            QString cfgPath = Utils::configFilePath(note->id);
+            const QString configPath =
+                Utils::configFilePath(note->id);
 
-            QSettings cfg(cfgPath, QSettings::IniFormat);
+            QSettings config(configPath, QSettings::IniFormat);
 
-            QString oldFileName = cfg.value("Note/fileName").toString();
+            const QString oldFileName =
+                config.value("Note/fileName").toString();
 
-            QString newPath = QDir(Utils::notesDirectory()).filePath(newFileName);
+            const QString newPath =
+                QDir(directory).filePath(newFileName);
 
-            // Rename old Markdown file if necessary.
+            // Rename the Markdown file when the note title changes.
             if (!oldFileName.isEmpty() &&
                 oldFileName != newFileName) {
 
-                QString oldPath =
-                    QDir(Utils::notesDirectory())
-                        .filePath(oldFileName);
+                const QString oldPath =
+                    QDir(directory).filePath(oldFileName);
 
                 if (QFile::exists(oldPath) &&
                     !QFile::exists(newPath)) {
@@ -208,7 +151,10 @@ public:
                 }
             }
 
-            note->updatedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+            // Update modification timestamp.
+            note->updatedAt =
+                QDateTime::currentDateTimeUtc()
+                    .toString(Qt::ISODateWithMs);
 
             // Save Markdown content.
             Utils::saveTextFile(
@@ -216,7 +162,7 @@ public:
                 note->serialize()
             );
 
-            // Save configuration.
+            // Save note configuration.
             Utils::saveNoteConfig(note);
         }
     }
@@ -225,47 +171,45 @@ public:
     {
         loading = true;
 
-        const QStringList configs =
-            Utils::configFiles();
+        static const QRegularExpression configRegex(
+            R"(^note_(\d+)\.cfg$)"
+        );
 
-        for (const QString &cfgName : configs) {
+        const QStringList configFiles = Utils::configFiles();
 
-            QRegularExpression regex(
-                R"(^note_(\d+)\.cfg$)"
-            );
-
-            auto match = regex.match(cfgName);
+        for (const QString &configName : configFiles) {
+            const auto match = configRegex.match(configName);
 
             if (!match.hasMatch())
                 continue;
 
-            int id = match.captured(1).toInt();
+            const int id = match.captured(1).toInt();
 
-            QString noteTitle;
+            QString title;
             QString fileName;
             QRect geometry;
-            bool pinned;
+            bool pinned = true;
 
             if (!Utils::loadNoteConfig(
                     id,
-                    noteTitle,
+                    title,
                     geometry,
                     pinned,
                     fileName)) {
                 continue;
             }
 
-            QString mdPath =
-                QDir(Utils::notesDirectory())
-                    .filePath(fileName);
+            const QString markdownPath =
+                QDir(Utils::notesDirectory()).filePath(fileName);
 
-            QString content = Utils::readTextFile(mdPath);
+            const QString content =
+                Utils::readTextFile(markdownPath);
 
             nextId = qMax(nextId, id + 1);
 
-            Note *note = new Note(
+            auto *note = new Note(
                 id,
-                noteTitle,
+                title,
                 content,
                 geometry,
                 pinned
@@ -273,38 +217,20 @@ public:
 
             notes.append(note);
 
-            connect(note->editor,
-                    &QPlainTextEdit::textChanged,
-                    this,
-                    [this]() { saveNotes(); });
+            connect(note->editor, &QPlainTextEdit::textChanged,
+                    this, &StickyApp::saveNotes);
 
-            connect(note->title,
-                    &QLineEdit::editingFinished,
-                    this,
-                    [this]() { saveNotes(); });
+            connect(note->title, &QLineEdit::editingFinished,
+                    this, &StickyApp::saveNotes);
 
             connect(note, &QObject::destroyed,
-                    this, [this, id]() {
-
-//                notes.removeIf(
-//                    [id](Note *n) {
-//                        return !n || n->id == id;
-//                    }
-//                );
-
-                //if (!QApplication::closingDown())
-                //    Utils::removeNoteFiles(id);
-
-                saveNotes();
-            });
+                    this, &StickyApp::saveNotes);
 
             note->show();
         }
 
         loading = false;
     }
-
-
 };
 
 int main(int argc, char *argv[])
