@@ -2,18 +2,14 @@
 #include "Utils.h"
 #include "Note.h"
 
-#include <QApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QTextStream>
+#include <QSettings>
 #include <QStandardPaths>
+#include <QTextStream>
 #include <QRegularExpression>
-#include <QFileInfoList>
-#include <QUuid>
-#include <QCryptographicHash>
 #include <QDateTime>
-#include <QRegularExpression>
 
 // --------------------------------------------------
 // Settings
@@ -32,16 +28,18 @@ QString Utils::notesDirectory()
 {
     QSettings settings = createSettings();
 
-    QString dir = settings.value("notesDirectory").toString();
+    QString directory =
+        settings.value("notesDirectory").toString();
 
-    if (dir.isEmpty()) {
-        dir = QStandardPaths::writableLocation(
-            QStandardPaths::AppDataLocation);
+    if (directory.isEmpty()) {
+        directory = QStandardPaths::writableLocation(
+            QStandardPaths::AppDataLocation
+        );
     }
 
-    QDir().mkpath(dir);
+    QDir().mkpath(directory);
 
-    return QDir(dir).absolutePath();
+    return QDir(directory).absolutePath();
 }
 
 bool Utils::setNotesDirectory(const QString &directory)
@@ -56,8 +54,10 @@ bool Utils::setNotesDirectory(const QString &directory)
 
     QSettings settings = createSettings();
 
-    settings.setValue("notesDirectory",
-                      dir.absolutePath());
+    settings.setValue(
+        "notesDirectory",
+        dir.absolutePath()
+    );
 
     settings.sync();
 
@@ -72,11 +72,14 @@ QString Utils::sanitizeFileName(const QString &title)
 {
     QString name = title.trimmed();
 
-    name.replace(
-        QRegularExpression(R"([<>:"/\\|?*])"),
-        "_"
+    // Replace characters invalid in filenames.
+    static const QRegularExpression invalidCharacters(
+        R"([<>:"/\\|?*])"
     );
 
+    name.replace(invalidCharacters, "_");
+
+    // Remove trailing dots and spaces.
     while (name.endsWith('.') || name.endsWith(' '))
         name.chop(1);
 
@@ -98,9 +101,10 @@ QString Utils::noteConfigFileName(int id)
 
 QString Utils::noteFilePath(int id)
 {
-    return QDir(notesDirectory()).filePath(
-        noteFileName(QString("Note_%1").arg(id))
-    );
+    const QString fileName =
+        noteFileName(QString("Note_%1").arg(id));
+
+    return QDir(notesDirectory()).filePath(fileName);
 }
 
 QString Utils::configFilePath(int id)
@@ -114,67 +118,67 @@ QString Utils::configFilePath(int id)
 // File operations
 // --------------------------------------------------
 
-bool Utils::saveTextFile(const QString &path,
-                             const QString &content)
+bool Utils::saveTextFile(
+    const QString &path,
+    const QString &content)
 {
     QFile file(path);
 
-    if (file.open(QIODevice::WriteOnly |
-                    QIODevice::Text |
-                    QIODevice::Truncate)) {
-
-        QTextStream out(&file);
-        out << content;
-
-        file.close();
-        return true;
+    if (!file.open(
+            QIODevice::WriteOnly |
+            QIODevice::Text |
+            QIODevice::Truncate)) {
+        return false;
     }
 
-    return false;
+    QTextStream out(&file);
+    out << content;
+
+    return file.error() == QFile::NoError;
 }
 
 QString Utils::readTextFile(const QString &path)
 {
     QFile file(path);
 
-    if (!file.open(QIODevice::ReadOnly |
-                   QIODevice::Text)) {
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
         return {};
-    }
 
     return QString::fromUtf8(file.readAll());
 }
 
 bool Utils::removeNoteFiles(int id)
 {
-    QString cfgPath = configFilePath(id);
+    const QString configPath = configFilePath(id);
 
-    QSettings cfg(cfgPath, QSettings::IniFormat);
+    QSettings config(configPath, QSettings::IniFormat);
 
-    QString fileName = cfg.value("Note/fileName").toString();
+    const QString fileName =
+        config.value("Note/fileName").toString();
 
     return removeNoteFiles(id, fileName);
 }
 
-bool Utils::removeNoteFiles(int id,
-                                const QString &fileName)
+bool Utils::removeNoteFiles(
+    int id,
+    const QString &fileName)
 {
     bool success = true;
 
     if (!fileName.isEmpty() &&
         isValidNoteFileName(fileName)) {
 
-        QString mdPath =
+        const QString markdownPath =
             QDir(notesDirectory()).filePath(fileName);
 
-        if (QFile::exists(mdPath))
-            success &= QFile::remove(mdPath);
+        if (QFile::exists(markdownPath))
+            success = QFile::remove(markdownPath);
     }
 
-    QString cfgPath = configFilePath(id);
+    const QString configPath = configFilePath(id);
 
-    if (QFile::exists(cfgPath))
-        success &= QFile::remove(cfgPath);
+    if (QFile::exists(configPath))
+        success = QFile::remove(configPath) && success;
 
     return success;
 }
@@ -185,71 +189,83 @@ bool Utils::removeNoteFiles(int id,
 
 bool Utils::saveNoteConfig(const Note *note)
 {
-    if (!note)
+    if (!note || !note->title)
         return false;
 
-    QSettings cfg(configFilePath(note->id),
-                  QSettings::IniFormat);
+    QSettings config(
+        configFilePath(note->id),
+        QSettings::IniFormat
+    );
 
-    cfg.beginGroup("Note");
+    config.beginGroup("Note");
 
-    cfg.setValue("id", note->id);
-    cfg.setValue("title", note->title->text());
-    cfg.setValue("fileName",
-                 noteFileName(note->title->text()));
+    config.setValue("id", note->id);
+    config.setValue("title", note->title->text());
+    config.setValue(
+        "fileName",
+        noteFileName(note->title->text())
+    );
 
-    cfg.setValue("x", note->x());
-    cfg.setValue("y", note->y());
-    cfg.setValue("width", note->width());
-    cfg.setValue("height", note->height());
+    config.setValue("x", note->x());
+    config.setValue("y", note->y());
+    config.setValue("width", note->width());
+    config.setValue("height", note->height());
 
-    cfg.setValue("pinned", note->pinned);
+    config.setValue("pinned", note->pinned);
 
-    cfg.endGroup();
+    config.endGroup();
 
-    cfg.sync();
+    config.sync();
 
-    return cfg.status() == QSettings::NoError;
+    return config.status() == QSettings::NoError;
 }
 
-bool Utils::loadNoteConfig(int id,
-                               QString &title,
-                               QRect &geometry,
-                               bool &pinned,
-                               QString &fileName)
+bool Utils::loadNoteConfig(
+    int id,
+    QString &title,
+    QRect &geometry,
+    bool &pinned,
+    QString &fileName)
 {
-    QSettings cfg(configFilePath(id),
-                  QSettings::IniFormat);
+    const QString configPath = configFilePath(id);
 
-    if (!QFile::exists(configFilePath(id)))
+    if (!QFile::exists(configPath))
         return false;
 
-    cfg.beginGroup("Note");
+    QSettings config(configPath, QSettings::IniFormat);
 
-    int storedId = cfg.value("id", -1).toInt();
+    config.beginGroup("Note");
+
+    const int storedId =
+        config.value("id", -1).toInt();
 
     if (storedId != id) {
-        cfg.endGroup();
+        config.endGroup();
         return false;
     }
 
-    title = cfg.value("title", "Untitled").toString();
+    title = config.value("title", "Untitled").toString();
 
-    fileName = cfg.value("fileName").toString();
+    fileName = config.value("fileName").toString();
 
     if (fileName.isEmpty())
         fileName = noteFileName(title);
 
+    if (!isValidNoteFileName(fileName)) {
+        config.endGroup();
+        return false;
+    }
+
     geometry = QRect(
-        cfg.value("x", 300).toInt(),
-        cfg.value("y", 200).toInt(),
-        cfg.value("width", 280).toInt(),
-        cfg.value("height", 240).toInt()
+        config.value("x", 300).toInt(),
+        config.value("y", 200).toInt(),
+        config.value("width", 280).toInt(),
+        config.value("height", 240).toInt()
     );
 
-    pinned = cfg.value("pinned", true).toBool();
+    pinned = config.value("pinned", true).toBool();
 
-    cfg.endGroup();
+    config.endGroup();
 
     return true;
 }
@@ -260,10 +276,10 @@ bool Utils::loadNoteConfig(int id,
 
 QStringList Utils::configFiles()
 {
-    QDir dir(notesDirectory());
+    QDir directory(notesDirectory());
 
-    return dir.entryList(
-        QStringList() << "note_*.cfg",
+    return directory.entryList(
+        {"note_*.cfg"},
         QDir::Files,
         QDir::Name
     );
@@ -273,23 +289,24 @@ QVector<int> Utils::existingNoteIds()
 {
     QVector<int> ids;
 
+    static const QRegularExpression configRegex(
+        R"(^note_(\d+)\.cfg$)"
+    );
+
     const QStringList files = configFiles();
 
-    QRegularExpression regex(R"(^note_(\d+)\.cfg$)");
-
     for (const QString &file : files) {
+        const auto match = configRegex.match(file);
 
-        QRegularExpressionMatch match =
-            regex.match(file);
+        if (!match.hasMatch())
+            continue;
 
-        if (match.hasMatch()) {
-            bool ok = false;
+        bool ok = false;
 
-            int id = match.captured(1).toInt(&ok);
+        const int id = match.captured(1).toInt(&ok);
 
-            if (ok)
-                ids.append(id);
-        }
+        if (ok)
+            ids.append(id);
     }
 
     return ids;
@@ -309,7 +326,7 @@ bool Utils::isValidNoteFileName(const QString &fileName)
     if (fileName.isEmpty())
         return false;
 
-    QFileInfo info(fileName);
+    const QFileInfo info(fileName);
 
     return info.fileName() == fileName &&
            fileName.endsWith(".md", Qt::CaseInsensitive) &&
